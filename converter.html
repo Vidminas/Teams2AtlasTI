@@ -1,302 +1,389 @@
 ---
 layout: default
 ---
-  
-<!doctype html>
+
+<!DOCTYPE html>
 <!-- Single web page implementation of a VTT Transcript Converter -->
 <html>
-<head>
-<title>Teams and Zoom Transcript Converter for NVivo</title>
+  <head>
+    <title>Teams Transcript Converter for Atlas.ti</title>
 
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-<!-- ****************************************** Stylesheet *********************************************** -->
+    <!-- ****************************************** Stylesheet *********************************************** -->
 
-<style>
+    <style>
+      footer,
+      #wordsDeleted {
+        font-style: italic;
+      }
 
-footer, #wordsDeleted {
-    font-style: italic;
-}
+      #interactions {
+        line-height: 2.5;
+      }
 
-#interactions {
-    line-height: 2.5;
-}
+      #unitTestResult {
+        color: red;
+      }
+    </style>
 
-#unitTestResult {
-    color:red;
-}
-</style>
+    <!-- ****************************************** Javascript *********************************************** -->
 
-<!-- ****************************************** Javascript *********************************************** -->
+    <script type="text/javascript">
+      function chatTranscriptChosenEvent(event) {
+        const input = event.target;
+        const filename = document.getElementById("fileName");
+        filename.value = input.files[0].name;
 
-<script type="text/javascript">
-var AllWordsDeleted={};
+        const reader = new FileReader();
+        reader.onload = function () {
+          const text = reader.result;
+          const node = document.getElementById("chatInputVTT");
+          node.value = text;
+        };
+        reader.readAsText(input.files[0]);
+        checkTimeshift();
+      }
 
-function fileChosenEvent(event){
-	var input = event.target;
-	
-	var inputFile = input.files[0].name;
-	
-	var filename = document.getElementById("fileName")
-	filename.value = inputFile
+      function streamTranscriptChosenEvent(event) {
+        const input = event.target;
+        const reader = new FileReader();
 
-	var reader = new FileReader();
-	reader.onload = function(){
-	  var text = reader.result;
-	  var node = document.getElementById('inputData');
-	  node.value = text;
-	  
-	};
-	reader.readAsText(input.files[0]);
- 
-    checkTimeshift()
-  };
-  
-function wordsDeleted(s) {
-    // Remembers the words from line s that will been removed.
-    for (const i of s.split('\t')[2].split(/\W+/).filter( s => s)) { // Split third item ignoring anything that's not alphanumeric.
-        AllWordsDeleted[i.toLowerCase()] = true;
-    }
-        
-}
-function processInput( input, timeshift, deleteShort ){
-    // Does the conversion, adding timeshift to each timestamp (may be negative)
-    // If deleteShort, then removes short phrases.
-    /* Input:
-        WEBVTT
-        NOTE stuff etc.
+        reader.onload = function () {
+          const text = reader.result;
 
-        00:00:00.000 --> 00:00:06.110
-        <v Fred>I'm sorry if cats meows happened throughout this. </v>
+          const firstTimestamp = text.match(
+            /([0-9]*):([0-9]*):([0-9]*).([0-9]*) --> /
+          );
+          const hh = firstTimestamp[1];
+          const mm = firstTimestamp[2];
+          const ss = firstTimestamp[3];
+          const ms = firstTimestamp[4];
+          const timeshift =
+            parseInt(hh) * 3600000 +
+            parseInt(mm) * 60000 +
+            parseInt(ss) * 1000 +
+            parseInt(ms);
+          const timeshiftInput = document.getElementById("timeshift");
+          timeshiftInput.value = timeshift;
+        };
 
-        00:00:06.820 --> 00:00:07.390
-        <v Fred>Uh.</v>
+        reader.readAsText(input.files[0]);
+        checkTimeshift();
+      }
 
-        00:00:08.070 --> 00:00:08.620
-        <v Joe>Right?</v>
-     
-    Output:
-        Timespan    Speaker Content
-        00:00:00    Fred    I'm sorry if cats meows happened throughout this. ---Uh.
-        00:00:08    Joe Right?
-        
-    or Zoom:
-        WEBVTT
+      function shiftedTimestamp(timeshift, hh, mm, ss, ms) {
+        let timeInMs =
+          parseInt(hh) * 3600000 +
+          parseInt(mm) * 60000 +
+          parseInt(ss) * 1000 +
+          parseInt(ms);
+        timeInMs += timeshift;
 
-        1
-        00:00:09.540 --> 00:00:12.990
-        Andrew Knight: We have that setup. Okay.
+        // Mark negative timestamps for removal.
+        if (timeInMs < 0) {
+          return "--:--:--";
+        }
 
-        3
-        00:00:15.630 --> 00:00:17.760
-        Andrew Knight: It's like Mary Kate's here. I'll let her in.
-
-    */
-    AllWordsDeleted={};
-    
-    return (input
-        .replace( /[a-z0-9]*-[a-z0-9]*-[a-z0-9]*-[a-z0-9]*-[a-z0-9]*\n/g,"") // Weird MS Streams ID lines go.
-        .replace(/.[0-9]* --> [0-9]*:[0-9]*:[0-9]*.[0-9]*/g,"   ") // All but the start of each timestamp line goes.
-        .replace(/NOTE .*?\n/g,"")  // Removes notes.
-        .replace(/WEBVTT/,"") // Nulls out intro line.
-        // Teams transcript items as above. Convert to tab delimited:
-        .replace(/(?<time>\d\d:\d\d:\d\d)\s*?\n<v (?<speaker>.*?)>(?<text>.*?)<\/v>\n/g, "$<time>\t$<speaker>\t$<text>" )
-        // Zoom transcript items:
-        .replace(/\d*?\n(?<time>\d\d:\d\d:\d\d)\s*?\n(?<speaker>.*?): (?<text>.*?)\n/g, "$<time>\t$<speaker>\t$<text>" )
-        // Occasionally Zoom doesn't put in a speaker. Put in as blank, and rely on NVivo 'fill down' or the concatenation below.
-        .replace(/\d*?\n(?<time>\d\d:\d\d:\d\d)\s*?\n(?<text>.*?)\n/g, "$<time>\t\t$<text>" )
-        // Take out initial blank lines, and replace with column headings:
-        .replace(/^\n*/, "Timespan\tSpeaker\tContent\n")
-        
-        /* Now look for short interjections (10 chars or less) and remove them: */
-        .replace(/(?<time>\d\d:\d\d:\d\d)\t(?<speaker>.*?)\t(?<text>[\S ]{0,10}?)\n/g, (s) => {
-            if (deleteShort) {
-                wordsDeleted( s );
-                return "";
-            }
-            return s;
-            })
-        
-        /* Now it gets complicated. We have:
-            00:00:00	Fred	I'm sorry if cat meows
-            00:00:06	Fred	Uh.
-        And we want:
-            00:00:00	Fred	I'm sorry if cat meows---Uh.
-        So we do a search that looks for the duplicated name using \k<groupName>.
-        We also do the same if the second speaker name is blank (Zoom special, or just no speakers).
-        To handle more than 2 in a row, we repeat it. We could do that until no more matches are found, but actually we probably want timestamps
-        every minute or so, so do it three times to get up to 8 items concatenated. */
-
-        .replace(/(?<time>\d\d:\d\d:\d\d)\t(?<speaker>.*?)\t(?<text>.*?)\n\d\d:\d\d:\d\d\t(\k<speaker>|)\t/g,
-                                        "$<time>\t$<speaker>\t$<text>---")
-        .replace(/(?<time>\d\d:\d\d:\d\d)\t(?<speaker>.*?)\t(?<text>.*?)\n\d\d:\d\d:\d\d\t(\k<speaker>|)\t/g,
-                                        "$<time>\t$<speaker>\t$<text>---")
-        .replace(/(?<time>\d\d:\d\d:\d\d)\t(?<speaker>.*?)\t(?<text>.*?)\n\d\d:\d\d:\d\d\t(\k<speaker>|)\t/g,
-                                        "$<time>\t$<speaker>\t$<text>---")
-
-        // And shift all the timestamps:
-        .replace(/\d\d:\d\d:\d\d\t/g, (e) => {
-            let hms=e.split(':');
-            let seconds = parseInt(hms[0]) * 3600 + parseInt(hms[1]) * 60 + parseInt(hms[2]);
-            seconds += timeshift;
-            let timestamp = seconds < 0 ? "--:--:--" : // Mark negative timestamps for removal.
-                                // ~~ forces integer arithmetic. PadStart zero-pads the string:
-                                (~~(seconds / 3600)).toString().padStart(2,'0') + ':' +
-                                (~~((seconds % 3600) / 60)).toString().padStart(2,'0') + ':' +
-                                (seconds % 60).toString().padStart(2,'0');
-            return timestamp + '\t';
-            })
-        
-        // Remove items with negative timestamps:
-        .replace(/--:--:--\t.*\n/g,"")
-        
-        /* And we need also to check for duplicate timestamps, which NVivo rejects
-        00:00:00	Fred	I'm sorry if cat meows
-        00:00:00	Jim Don't worry about the cat.
-        Put .5 after the second timestamp. Won't handle triples, but they're unlikely. */
-        
-        .replace(/(?<time>\d\d:\d\d:\d\d)\t(?<rest>.*?)\n\k<time>\t/g,"$<time>\t$<rest>\n$<time>.5\t")
-        
+        // ~~ forces integer arithmetic. PadStart zero-pads the string:
+        return (
+          (~~(timeInMs / 3600000)).toString().padStart(2, "0") +
+          ":" +
+          (~~((timeInMs % 3600000) / 60000)).toString().padStart(2, "0") +
+          ":" +
+          (~~((timeInMs % 60000) / 1000)).toString().padStart(2, "0") +
+          "." +
+          (timeInMs % 1000).toString().padStart(3, "0")
         );
-}
+      }
 
-function cleanVTT(){
-    var input = document.getElementById("inputData").value
+      function processInput(input, timeshiftInMs, shouldDeleteShort) {
+        // Does the conversion, adding timeshift to each timestamp (may be negative)
+        // If shouldDeleteShort, then removes short phrases under 10 characters.
+        const AllWordsDeleted = {};
 
-    var outputElement = document.getElementById("output")
-    var filename = document.getElementById("fileName").value;
-    var timeshift = parseInt(document.getElementById("timeshift").value);
-    var deleteShort = document.getElementById("deleteShort").checked
+        let output = input
+          // Remove notes (e.g., level of confidence in auto transcription)
+          .replace(/NOTE .*?\n/g, "")
+          // Remove cue ids (they're completely optional)
+          .replace(/[a-z0-9]*-[a-z0-9]*-[a-z0-9]*-[a-z0-9]*-[a-z0-9]*\n/g, "")
+          // Atlas.ti breaks when timestamps aren't zero-padded, so this both adds padding
+          // and offsets by specified timeshift
+          .replace(
+            /([0-9]*):([0-9]*):([0-9]*).([0-9]*) --> ([0-9]*):([0-9]*):([0-9]*).([0-9]*)/g,
+            (match, hh1, mm1, ss1, ms1, hh2, mm2, ss2, ms2) => {
+              const timestamp1 = shiftedTimestamp(
+                timeshiftInMs,
+                hh1,
+                mm1,
+                ss1,
+                ms1
+              );
+              const timestamp2 = shiftedTimestamp(
+                timeshiftInMs,
+                hh2,
+                mm2,
+                ss2,
+                ms2
+              );
+              return timestamp1 + " --> " + timestamp2;
+            }
+          )
+          // Remove items with negative timestamps:
+          .replace(
+            /.*(?<time>--:--:--).*\n<v (?<speaker>.*?)>(?<text>.*?)<\/v>\n/g,
+            ""
+          );
 
-    outputElement.value = processInput( input, timeshift, deleteShort )
-    document.getElementById("wordsDeleted").innerHTML = Object.keys(AllWordsDeleted).join(' '); // Safe, since all non-alphanum filtered out in WordsDeleted().
-    download(filename);
-}
+        if (shouldDeleteShort) {
+          // Now look for short interjections and remove them:
+          output = output.replace(
+            /(?<time>\d\d:\d\d:\d\d.\d\d\d).*\n<v (?<speaker>.*?)>(?<text>[\S ]{0,6}?)<\/v>\n/g,
+            (line, time, speaker, text) => {
+              // Remembers the words from line that will be removed.
+              for (const i of text.split(/\W+/).filter((s) => s)) {
+                // Split third item ignoring anything that's not alphanumeric.
+                AllWordsDeleted[i.toLowerCase()] = true;
+              }
 
+              return "";
+            }
+          );
+        }
 
-function download(filename) {
-    // Saves the contents of element 'output' to file filename, replacing its extension with .txt
-	filename = filename.replace(/.vtt$/i, ".txt");
-	var input = document.getElementById("output").value
-	var element = document.createElement('a');
-	element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(input));
-	element.setAttribute('download', filename);
+        output = output
+          // Atlas.ti doesn't support voice tags, so reformat them to be a bit nicer
+          .replace(/<v (.+)>(.+)<\/v>/g, "$1: $2")
+          // Collapse consecutive blank lines
+          .replace(/\r?\n[\r\n]+/g, "\n\n")
+          // And finally remove whitespace at end of file for consistency
+          .replace(/\s+$/, "");
 
-	element.style.display = 'none';
-	document.body.appendChild(element);
+        document.getElementById("wordsDeleted").innerHTML =
+          Object.keys(AllWordsDeleted).join(" "); // Safe, since all non-alphanum filtered out in WordsDeleted().
 
-	element.click();
+        return output;
+      }
 
-	document.body.removeChild(element);
-}
+      function cleanVTT() {
+        const inputData = document.getElementById("chatInputVTT").value;
+        const outputElement = document.getElementById("outputVTT");
+        const outputFilename = document.getElementById("fileName").value;
 
-function checkTimeshift() {
-    // Disables the Convert and Download button if there's no input file or the timeshift is invalid.
-    document.getElementById("doConvert").disabled = !
-        (document.getElementById("timeshift").value.match( /^-?\d+$/ ) &&
-        document.getElementById("fileName").value.length != 0)
+        const timeshiftInMs = parseInt(
+          document.getElementById("timeshift").value
+        );
+        const shouldDeleteShort =
+          document.getElementById("deleteShort").checked;
+
+        outputElement.value = processInput(
+          inputData,
+          timeshiftInMs,
+          shouldDeleteShort
+        );
+        download(outputFilename);
+      }
+
+      function download(filename) {
+        // Saves the contents of element 'output' to file with provided filename
+        var input = document.getElementById("outputVTT").value;
+        var element = document.createElement("a");
+        element.setAttribute(
+          "href",
+          "data:text/vtt;charset=utf-8," + encodeURIComponent(input)
+        );
+        element.setAttribute("download", filename);
+
+        element.style.display = "none";
+        document.body.appendChild(element);
+
+        element.click();
+
+        document.body.removeChild(element);
+      }
+
+      function checkTimeshift() {
+        // Disables the Convert and Download button if there's no input file or the timeshift is invalid.
+        document.getElementById("doConvert").disabled = !(
+          document.getElementById("timeshift").value.match(/^-?\d+$/) &&
+          document.getElementById("fileName").value.length != 0
+        );
+      }
+    </script>
+  </head>
+  <!-- ****************************************** HTML body *********************************************** -->
+
+  <body>
+    <!-- Converter symbol in SVG -->
+    <img
+      src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTUiIGhlaWdodD0iMTUiIHZpZXdCb3g9IjAgMCAxNSAxNSIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICAgIDxwYXRoIGQ9Ik03LjA5Mzc1IDEuNDA2MjVDNy4wOTM3NSAxLjYyOTY5IDcuMjc2NTYgMS44MTI1IDcuNSAxLjgxMjVDOS4wMjM0NCAxLjgxMjUgMTAuNDQ1MyAyLjQwMTU2IDExLjUyMTkgMy40NzgxMkMxMi41OTg0IDQuNTU0NjkgMTMuMTg3NSA1Ljk3NjU2IDEzLjE4NzUgNy41QzEzLjE4NzUgOS4wMDMxMyAxMi42MTg4IDEwLjQwNDcgMTEuNTYyNSAxMS40ODEyVjEwLjM0MzhDMTEuNTYyNSAxMC4xMjAzIDExLjM3OTcgOS45Mzc1IDExLjE1NjIgOS45Mzc1QzEwLjkzMjggOS45Mzc1IDEwLjc1IDEwLjEyMDMgMTAuNzUgMTAuMzQzOFYxMi43ODEySDEzLjE4NzVDMTMuNDEwOSAxMi43ODEyIDEzLjU5MzggMTIuNTk4NCAxMy41OTM4IDEyLjM3NUMxMy41OTM4IDEyLjE1MTYgMTMuNDEwOSAxMS45Njg4IDEzLjE4NzUgMTEuOTY4OEgxMi4yMTI1QzEzLjM3MDMgMTAuNzUgMTQgOS4xODU5NCAxNCA3LjVDMTQgNS43NzM0NCAxMy4zMjk3IDQuMTI4MTIgMTIuMDkwNiAyLjkwOTM3QzEwLjg3MTkgMS42NzAzMSA5LjIyNjU2IDEgNy41IDFDNy4yNzY1NiAxIDcuMDkzNzUgMS4xODI4MSA3LjA5Mzc1IDEuNDA2MjVaIiBmaWxsPSIjMjgzOTUyIiBzdHJva2U9IiMyODM5NTIiLz4KICAgIDxwYXRoIGQ9Ik0yLjkwOTM3IDEyLjA5MDZDNC4xMjgxMiAxMy4zMDk0IDUuNzczNDQgMTQgNy41IDE0QzcuNzIzNDQgMTQgNy45MDYyNSAxMy44MTcyIDcuOTA2MjUgMTMuNTkzOEM3LjkwNjI1IDEzLjM3MDMgNy43MjM0NCAxMy4xODc1IDcuNSAxMy4xODc1QzUuOTc2NTYgMTMuMTg3NSA0LjU1NDY5IDEyLjU5ODQgMy40NzgxMiAxMS41MjE5QzIuNDAxNTYgMTAuNDQ1MyAxLjgxMjUgOS4wMjM0NCAxLjgxMjUgNy41QzEuODEyNSA1Ljk5Njg4IDIuMzgxMjUgNC41OTUzMSAzLjQzNzUgMy41MTg3NVY0LjY1NjI1QzMuNDM3NSA0Ljg3OTY5IDMuNjIwMzEgNS4wNjI1IDMuODQzNzUgNS4wNjI1QzQuMDY3MTkgNS4wNjI1IDQuMjUgNC44Nzk2OSA0LjI1IDQuNjU2MjVWMi4yMTg3NUgxLjgxMjVDMS41ODkwNiAyLjIxODc1IDEuNDA2MjUgMi40MDE1NiAxLjQwNjI1IDIuNjI1QzEuNDA2MjUgMi44NDg0NCAxLjU4OTA2IDMuMDMxMjUgMS44MTI1IDMuMDMxMjVIMi43ODc1QzEuNjI5NjkgNC4yNSAxIDUuODE0MDYgMSA3LjVDMSA5LjIyNjU2IDEuNjcwMzEgMTAuODcxOSAyLjkwOTM3IDEyLjA5MDZaIiBmaWxsPSIjMjgzOTUyIiBzdHJva2U9IiMyODM5NTIiLz4KPC9zdmc+Cg=="
+      width="8%"
+    />
+
+    <h3>Transcript Converter</h3>
+
+    <div>
+      <p>
+        This page will transform a WebVTT transcript file from Microsoft Teams
+        to be ready for import into Atlas.ti
+      </p>
+
+      <p>
+        Choose a file from your computer using Choose file. This should be a
+        text based file with a .vtt extension as downloaded from the Teams chat.
+      </p>
+
+      <p>See <a href="index.html">the main page</a> for full instructions.</p>
+
+      <p>
+        If you want to adjust the transcript timestamps, you may either specify
+        a time shift value in milliseconds manually (which will then be added to
+        each timestamp; this value can be negative) or to upload another
+        transcript file from Microsoft Stream, which will pick up the time shift
+        value automatically. You can also choose to filter out phrases of 6 or
+        fewer characters. Then click Convert and Download to process your
+        transcript(s) and save the transformed output file.
+      </p>
+    </div>
+
+    <div id="interactions">
+      <form name="data">
+        <input
+          type="file"
+          id="myFile"
+          single
+          size="50"
+          accept=".vtt"
+          onchange="chatTranscriptChosenEvent(event)"
+        />
+        <input type="hidden" id="fileName" /><br />
+
+        <label for="timeshift">Manual time shift (in ms):</label>
+        <input
+          type="text"
+          id="timeshift"
+          name="timeshift"
+          value="0"
+          onChange="checkTimeshift()"
+        />
+
+        <span> OR </span>
+
+        <label for="autoTimeshift"
+          >Get time shift from MS Stream VTT file:</label
+        >
+        <input
+          type="file"
+          id="autoTimeshift"
+          name="autoTimeshift"
+          single
+          size="50"
+          accept=".vtt"
+          onchange="streamTranscriptChosenEvent(event)"
+        /><br />
+
+        <label for="deleteShort"
+          >Filter out short (&lt;= 6 chars) phrases:</label
+        >
+        <input
+          type="checkbox"
+          id="deleteShort"
+          name="deleteShort"
+          value="false"
+        /><br />
+
+        <input
+          type="button"
+          id="doConvert"
+          onclick="cleanVTT()"
+          disabled
+          value="Convert and Download"
+        />
+      </form>
+    </div>
+
+    <!-- Dummy textareas to hold the input and output file contents -->
+    <div id="inputDiv" style="display: none">
+      <p>Input data</p>
+      <textarea id="chatInputVTT"></textarea>
+    </div>
+
+    <div id="outputDiv" style="display: none">
+      <p>Output data</p>
+      <textarea id="outputVTT"></textarea>
+    </div>
+
+    <p>Words filtered: <span id="wordsDeleted" /></p>
+    <p id="unitTestResult"></p>
+
+    <p>
+      I only expect this tool to be useful temporarily, so I don't plan to
+      maintain the project, but if you'd like to improve or extend it, pull
+      requests are welcome.
+    </p>
+
+    <!-- Footer with copyright etc. -->
+
+    <footer id="footer">
+      <p>
+        Copyright (c) 2022 Vidminas Mikucionis<br />
+        Portions Copyright (c) 2021 Charles Weir <br />
+        Portions Copyright (c) 2020 Tim Ellis
+      </p>
+
+      <p>
+        Permission is hereby granted, free of charge, to any person obtaining a
+        copy of this software and associated documentation files (the
+        "Software"), to deal in the Software without restriction, including
+        without limitation the rights to use, copy, modify, merge, publish,
+        distribute, sublicense, and/or sell copies of the Software, and to
+        permit persons to whom the Software is furnished to do so, subject to
+        the following conditions:
+      </p>
+
+      <p>
+        The above copyright notice and this permission notice shall be included
+        in all copies or substantial portions of the Software.
+      </p>
+
+      <p>
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+        OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+        MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+        IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+        CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+        TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+        SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+      </p>
+    </footer>
+  </body>
+
+  <!-- ************************************ Unit Tests ****************************** -->
+
+  <script type="text/javascript">
+    // This script runs unit tests on page load, and displays an error message if they fail.
+    function findError(actual, expected) {
+      // Answers an error message with the location of the error and problem.
+      actuals = actual.split("\n");
+      expecteds = expected.split("\n");
+      console.log(actual);
+      console.log(expected);
+      for (var i = 0; i < Math.min(actuals.length, expecteds.length); i++) {
+        if (!(actuals[i] === expecteds[i])) break;
+      }
+      return (
+        "output line " +
+        (i + 1).toString() +
+        ': expected "' +
+        expecteds[i] +
+        '", got "' +
+        actuals[i] +
+        '"'
+      );
     }
-    
-</script>
-</head>
-<!-- ****************************************** HTML body *********************************************** -->
 
-<body >
-<!-- Converter symbol in SVG -->
-<img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTUiIGhlaWdodD0iMTUiIHZpZXdCb3g9IjAgMCAxNSAxNSIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICAgIDxwYXRoIGQ9Ik03LjA5Mzc1IDEuNDA2MjVDNy4wOTM3NSAxLjYyOTY5IDcuMjc2NTYgMS44MTI1IDcuNSAxLjgxMjVDOS4wMjM0NCAxLjgxMjUgMTAuNDQ1MyAyLjQwMTU2IDExLjUyMTkgMy40NzgxMkMxMi41OTg0IDQuNTU0NjkgMTMuMTg3NSA1Ljk3NjU2IDEzLjE4NzUgNy41QzEzLjE4NzUgOS4wMDMxMyAxMi42MTg4IDEwLjQwNDcgMTEuNTYyNSAxMS40ODEyVjEwLjM0MzhDMTEuNTYyNSAxMC4xMjAzIDExLjM3OTcgOS45Mzc1IDExLjE1NjIgOS45Mzc1QzEwLjkzMjggOS45Mzc1IDEwLjc1IDEwLjEyMDMgMTAuNzUgMTAuMzQzOFYxMi43ODEySDEzLjE4NzVDMTMuNDEwOSAxMi43ODEyIDEzLjU5MzggMTIuNTk4NCAxMy41OTM4IDEyLjM3NUMxMy41OTM4IDEyLjE1MTYgMTMuNDEwOSAxMS45Njg4IDEzLjE4NzUgMTEuOTY4OEgxMi4yMTI1QzEzLjM3MDMgMTAuNzUgMTQgOS4xODU5NCAxNCA3LjVDMTQgNS43NzM0NCAxMy4zMjk3IDQuMTI4MTIgMTIuMDkwNiAyLjkwOTM3QzEwLjg3MTkgMS42NzAzMSA5LjIyNjU2IDEgNy41IDFDNy4yNzY1NiAxIDcuMDkzNzUgMS4xODI4MSA3LjA5Mzc1IDEuNDA2MjVaIiBmaWxsPSIjMjgzOTUyIiBzdHJva2U9IiMyODM5NTIiLz4KICAgIDxwYXRoIGQ9Ik0yLjkwOTM3IDEyLjA5MDZDNC4xMjgxMiAxMy4zMDk0IDUuNzczNDQgMTQgNy41IDE0QzcuNzIzNDQgMTQgNy45MDYyNSAxMy44MTcyIDcuOTA2MjUgMTMuNTkzOEM3LjkwNjI1IDEzLjM3MDMgNy43MjM0NCAxMy4xODc1IDcuNSAxMy4xODc1QzUuOTc2NTYgMTMuMTg3NSA0LjU1NDY5IDEyLjU5ODQgMy40NzgxMiAxMS41MjE5QzIuNDAxNTYgMTAuNDQ1MyAxLjgxMjUgOS4wMjM0NCAxLjgxMjUgNy41QzEuODEyNSA1Ljk5Njg4IDIuMzgxMjUgNC41OTUzMSAzLjQzNzUgMy41MTg3NVY0LjY1NjI1QzMuNDM3NSA0Ljg3OTY5IDMuNjIwMzEgNS4wNjI1IDMuODQzNzUgNS4wNjI1QzQuMDY3MTkgNS4wNjI1IDQuMjUgNC44Nzk2OSA0LjI1IDQuNjU2MjVWMi4yMTg3NUgxLjgxMjVDMS41ODkwNiAyLjIxODc1IDEuNDA2MjUgMi40MDE1NiAxLjQwNjI1IDIuNjI1QzEuNDA2MjUgMi44NDg0NCAxLjU4OTA2IDMuMDMxMjUgMS44MTI1IDMuMDMxMjVIMi43ODc1QzEuNjI5NjkgNC4yNSAxIDUuODE0MDYgMSA3LjVDMSA5LjIyNjU2IDEuNjcwMzEgMTAuODcxOSAyLjkwOTM3IDEyLjA5MDZaIiBmaWxsPSIjMjgzOTUyIiBzdHJva2U9IiMyODM5NTIiLz4KPC9zdmc+Cg==" width="8%" >
-
-  <h3>Transcript Converter</h3>
-
-<div>
-	<p>This page will convert a WebVtt transcript file from Microsoft Teams or Zoom into a formatted text file to import into NVivo</p>
-
-	<p>Choose a file from your computer using Choose file. This should be a text based file with a .vtt extension as downloaded from Teams or Zoom (but preferably not from Microsoft Streams, which doesn't provide speaker information). </p>
- 
-    <p>See <a href="index.html">the main page</a> for full instructions.</p>
-    
-    <p>You may want to enter a time shift value in seconds to add to each timestamp (typically -10 or so), and to filter out phrases of less than 10 characters.
-        Then click Convert and Download to create the converted .txt file</p>
-</div>
-
-<div id="interactions"> <!--style="float:left;"-->
-
-	<form name="data">
-		<input type="file" id="myFile" single size="50" accept=".vtt" onchange="fileChosenEvent(event)">
-
-		<input type="hidden" id="fileName" /><br/>
-        <label for="timeshift">Time shift (advanced):</label>
-        <input type="text" id="timeshift" name="timeshift" value=0 onChange="checkTimeshift()"><br/>
-        <label for="deleteShort">Filter out short phrases (advanced):</label>
-        <input type="checkbox" id="deleteShort" name="deleteShort" value=false><br/>
-		<input type="button" id="doConvert" onclick="cleanVTT();" disabled value="Convert and Download"/>
-	</form>
-</div>
-
-<!-- Dummy textareas to hold the input and output file contents -->
-<div id="inputDiv" style="display: none;">
-	<p>Input</p>
-	<textarea id="inputData" name="inputData"  >
-		</textarea>	
-</div>
-
-<div id="outputDiv" style="display: none;">
-	<p>Output</p>
-	<textarea id="output" >
-	</textarea>
-</div>
-
-<p>Words filtered: <span id="wordsDeleted"/></p>
-<p id="unitTestResult" ></p>
-    
-<p> If you find a bug in the converter, or want to suggest an improvement, please report it in the <a href="https://github.com/SecurityEssentials/Teams2NVivo/issues">project issue tracker here</a>,
-citing the browser used, the operating system, the issue, and perhaps a sample of a VTT file that causes the problem (edited if necessary to preserve privacy). </p>
-
-<!-- Footer with copyright etc. -->
-
-<footer id="footer">
-
-<p>Copyright (c) 2021 Charles Weir <br/>
-Portions Copyright (c) 2020 Tim Ellis</p>
-
-<p>Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:</p>
-
-<p>The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.</p>
-
-<p>THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.</p>
-    
-  </div>
-</div>
-</footer>
-</body>
-
-<!-- ************************************ Unit Tests ****************************** -->
-
-<script type="text/javascript">
-// This script runs unit tests on page load, and displays an error message if they fail.
-function findError(actual, expected) {
-    // Answers an error message with the location of the error and problem.
-    actuals = actual.split("\n");
-    expecteds = expected.split("\n")
-    for (var i = 0; i<Math.min(actuals.length, expecteds.length); i++) {
-        if (! (actuals[i] === expecteds[i]))
-            break;
-    }
-    return "output line " + (i+1).toString() + ': expected "' + expecteds[i] + '", got "' + actuals[i] + '"';
-}
-var testInput=`WEBVTT
+    const testInput = `WEBVTT
 
 NOTE Confidence: 0.648119294
 
@@ -311,77 +398,61 @@ NOTE Confidence: 0.648119294
 Times don't matter for testing.
 
 NOTE Transcripts with speaker from Microsoft Teams
-00:00:00.000 --> 00:00:06.110
+0:0:0.000 --> 0:0:06.110
 <v Joe>Captions from Teams. Before start.</v>
 
-00:00:01.000 --> 00:00:06.110
-<v Fred>I'm sorry if cats meows happened throughout this. </v>
+0:0:01.000 --> 0:0:06.110
+<v Fred>I'm sorry if cats meows happened throughout this.</v>
 
-00:00:06.820 --> 00:00:07.390
-<v Fred>The cats are rather worried at the moment.</v>
+0:0:05.000 --> 0:0:06.110
+<v Joe>Err.</v>
 
-00:00:08.070 --> 00:00:08.620
-<v Joe>That sounds interesting.</v>
-
-NOTE Zoom transcripts (occasionally omit the speaker)
-2
-00:00:09.540 --> 00:00:12.990
-Andrew Knight: Captions from Zoom. Okay.
-
-3
-00:00:15.540 --> 00:00:18.990
-More captions.
-
-NOTE Testing only 8 items concatenated. Use pre-converted data:
-00:00:01\tFred\tParticularly interesting
-00:00:01\tFred\tParticularly interesting
-00:00:01\t\tParticularly interesting
-00:00:01\t\tParticularly interesting
-00:00:01\tFred\tParticularly interesting
-00:00:01\tFred\tParticularly interesting
-00:00:01\tFred\tParticularly interesting
-00:00:01\tFred\tParticularly interesting
-00:00:02\tFred\tParticularly interesting
-NOTE Testing removing short interjections:
-00:00:01.000 --> 00:01:06.110
-<v Joe>I'm saying something.</v>
-
-00:00:01.000 --> 00:00:06.110
-<v Fred>Yes?</v>
-
-00:00:06.820 --> 00:00:07.390
-<v Joe>Err</v>
-
-00:00:08.070 --> 00:00:08.620
-<v Joe>Yes, It's very interesting.</v>
+0:0:06.450 --> 0:0:06.990
+<v Joe>Yes.</v>
 `;
 
-var expectedOutput=`Timespan\tSpeaker\tContent
-00:00:01\t\tNon-speaker captions from Microsoft Stream---Times don't matter for testing.
-00:00:00\tFred\tI'm sorry if cats meows happened throughout this. ---The cats are rather worried at the moment.
-00:00:07\tJoe\tThat sounds interesting.
-00:00:08\tAndrew Knight\tCaptions from Zoom. Okay.---More captions.
-00:00:00\tFred\tParticularly interesting---Particularly interesting---Particularly interesting---Particularly interesting---Particularly interesting---Particularly interesting---Particularly interesting---Particularly interesting
-00:00:01\tFred\tParticularly interesting
-00:00:00\tJoe\tI'm saying something.---Yes, It's very interesting.`
+    const expectedOutput = `WEBVTT
 
-expectedNonDeleteShortOutput=`Timespan\tSpeaker\tContent
-00:00:02\t\tNon-speaker captions from Microsoft Stream---Times don't matter for testing.
-00:00:00	Joe	Captions from Teams. Before start.
-00:00:01	Fred	I'm sorry if cats meows happened throughout this. ---The cats are rather worried at the moment.
-00:00:08	Joe	That sounds interesting.
-00:00:09	Andrew Knight	Captions from Zoom. Okay.---More captions.
-00:00:01	Fred	Particularly interesting---Particularly interesting---Particularly interesting---Particularly interesting---Particularly interesting---Particularly interesting---Particularly interesting---Particularly interesting
-00:00:02	Fred	Particularly interesting
-00:00:01	Joe	I'm saying something.
-00:00:01.5	Fred	Yes?
-00:00:06	Joe	Err---Yes, It's very interesting.`
+00:00:01.160 --> 00:00:05.560
+Non-speaker captions from Microsoft Stream
 
-deleteShortOutput= processInput(testInput, -1, true);
-nonDeleteShortOutput= processInput(testInput, 0, false);
-document.getElementById("unitTestResult").innerHTML = deleteShortOutput === expectedOutput && nonDeleteShortOutput === expectedNonDeleteShortOutput ? ""
-    : "Self tests failed: " +
-        (deleteShortOutput === expectedOutput ? "ND " + findError( nonDeleteShortOutput, expectedNonDeleteShortOutput ) : findError( deleteShortOutput, expectedOutput)) +
-        "<br> Please notifiy developers.";
-    
-</script>
+00:00:05.560 --> 00:00:06.967
+Times don't matter for testing.
+
+00:00:00.000 --> 00:00:05.110
+Fred: I'm sorry if cats meows happened throughout this.`;
+
+    expectedNonDeleteShortOutput = `WEBVTT
+
+00:00:02.160 --> 00:00:06.560
+Non-speaker captions from Microsoft Stream
+
+00:00:06.560 --> 00:00:07.967
+Times don't matter for testing.
+
+00:00:00.000 --> 00:00:06.110
+Joe: Captions from Teams. Before start.
+
+00:00:01.000 --> 00:00:06.110
+Fred: I'm sorry if cats meows happened throughout this.
+
+00:00:05.000 --> 00:00:06.110
+Joe: Err.
+
+00:00:06.450 --> 00:00:06.990
+Joe: Yes.`;
+
+    deleteShortOutput = processInput(testInput, -1000, true);
+    nonDeleteShortOutput = processInput(testInput, 0, false);
+    document.getElementById("unitTestResult").innerHTML =
+      deleteShortOutput === expectedOutput &&
+      nonDeleteShortOutput === expectedNonDeleteShortOutput
+        ? ""
+        : "Self tests failed: " +
+          (deleteShortOutput === expectedOutput
+            ? "ND " +
+              findError(nonDeleteShortOutput, expectedNonDeleteShortOutput)
+            : findError(deleteShortOutput, expectedOutput)) +
+          "<br> Please notify developers.";
+  </script>
+</html>

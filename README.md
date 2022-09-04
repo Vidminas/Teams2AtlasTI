@@ -1,8 +1,8 @@
-# Convert Teams and Zoom Transcripts to NVivo
+# Convert Teams Transcripts to Atlas.ti
 
-This utility converts an automated transcript created by either of the online video conference services [Microsoft Teams](https://www.microsoft.com/en-gb/microsoft-teams/group-chat-software) or [Zoom](https://zoom.us/), to support the popular qualitative analysis tool [NVivo](https://www.qsrinternational.com/nvivo-qualitative-data-analysis-software/home). It provides extra options so as to make coding and analysis as easy as possible.
+This utility converts an automated transcript created by the online video conference service [Microsoft Teams](https://www.microsoft.com/en-gb/microsoft-teams/group-chat-software), to support the popular qualitative analysis tool [Atlas.ti](https://atlasti.com/).
 
+Although since March 2021, Atlas.ti supports VTT transcripts, a couple of bugs in Teams prevent them from working well. This utility helps to work around them.
 
-
-See [the hosted pages on Github Pages](https://securityessentials.github.io/Teams2NVivo/index.html ) for instructions and usage.
+See [the hosted pages on Github Pages](https://vidminas.github.io/Teams2AtlasTI/index.html) for instructions and usage.
 
